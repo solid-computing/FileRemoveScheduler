@@ -1,4 +1,6 @@
-﻿using Microsoft.Extensions.Configuration;
+﻿using Hangfire;
+using Hangfire.LiteDB;
+using Microsoft.Extensions.Configuration;
 using Serilog;
 using System;
 using System.IO;
@@ -9,13 +11,29 @@ namespace FileRemoveScheduler
     {
         static void Main(string[] args)
         {
-            IConfigurationRoot configuration = GetConfiguration();
-            Log.Logger = new LoggerConfiguration().WriteTo.File("FileRemoveScheduler.log").CreateLogger();
+            try
+            {
+                Log.Logger = new LoggerConfiguration().WriteTo.File("FileRemoveScheduler.log").CreateLogger();
+                GlobalConfiguration.Configuration.UseLiteDbStorage("FileRemoveScheduler.db");
+                using (new BackgroundJobServer())
+                {
+                    RecurringJob.AddOrUpdate(() => JobToRun(), Cron.Daily);                    
+                    Console.ReadLine();
+                }
+            } catch (Exception)
+            {
+                throw;
+            }
+        }
 
+        public static void JobToRun()
+        {
+            IConfigurationRoot configuration = GetConfiguration();
             var folderLocation = configuration.GetSection("folderLocation").Value;
             DirectoryInfo topDircetory = new DirectoryInfo(folderLocation);
+            Console.WriteLine($"Checking if files need deleting now {DateTime.Now}");
+
             var tenDaysAgoToday = DateTime.UtcNow.AddDays(-int.Parse(configuration.GetSection("retentionDays").Value));
-            
             foreach (var item in topDircetory.GetFiles("*.*", SearchOption.AllDirectories))
             {
                 if (item.LastWriteTimeUtc <= tenDaysAgoToday)
@@ -29,11 +47,6 @@ namespace FileRemoveScheduler
                         Log.Error(e, "Error deleting file");
                     }
                 }
-            }
-
-            while (true)
-            {
-                System.Threading.Thread.Sleep(1);
             }
         }
 
