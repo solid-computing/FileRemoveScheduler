@@ -1,63 +1,40 @@
-﻿using Hangfire;
-using Hangfire.LiteDB;
-using Microsoft.Extensions.Configuration;
-using Serilog;
-using System;
-using System.IO;
+﻿using System;
+using PeterKottas.DotNetCore.WindowsService;
 
 namespace FileRemoveScheduler
 {
-    class Program
+    public class Program
     {
         static void Main(string[] args)
         {
-            try
+            ServiceRunner<FileRemoveSchedulerMicroService>.Run(config =>
             {
-                Log.Logger = new LoggerConfiguration().WriteTo.File("FileRemoveScheduler.log").CreateLogger();
-                GlobalConfiguration.Configuration.UseLiteDbStorage("FileRemoveScheduler.db");
-                using (new BackgroundJobServer())
+                var name = config.GetDefaultName();
+                config.Service(serviceConfig =>
                 {
-                    RecurringJob.AddOrUpdate(() => JobToRun(), Cron.Daily);                    
-                    Console.ReadLine();
-                }
-            } catch (Exception)
-            {
-                throw;
-            }
-        }
+                    serviceConfig.ServiceFactory((extraArguments, controller) => new FileRemoveSchedulerMicroService());
 
-        public static void JobToRun()
-        {
-            IConfigurationRoot configuration = GetConfiguration();
-            var folderLocation = configuration.GetSection("folderLocation").Value;
-            DirectoryInfo topDircetory = new DirectoryInfo(folderLocation);
-            Console.WriteLine($"Checking if files need deleting now {DateTime.Now}");
-
-            var tenDaysAgoToday = DateTime.UtcNow.AddDays(-int.Parse(configuration.GetSection("retentionDays").Value));
-            foreach (var item in topDircetory.GetFiles("*.*", SearchOption.AllDirectories))
-            {
-                if (item.LastWriteTimeUtc <= tenDaysAgoToday)
-                {
-                    try
+                    serviceConfig.OnStart((service, extraParams) =>
                     {
-                        item.Delete();
-                    }
-                    catch (Exception e)
+                        Console.WriteLine("Service {0} started", name);
+                        service.Start();
+                    });
+
+                    serviceConfig.OnStop(service =>
                     {
-                        Log.Error(e, "Error deleting file");
-                    }
-                }
-            }
-        }
+                        Console.WriteLine("Service {0} stopped", name);
+                        service.Stop();
+                    });
 
-        private static IConfigurationRoot GetConfiguration()
-        {
-            var builder = new ConfigurationBuilder()
-           .SetBasePath(Directory.GetCurrentDirectory())
-           .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true);
+                    serviceConfig.OnShutdown(service => { Console.WriteLine("Service {0} shutdown", name); });
 
-            IConfigurationRoot configuration = builder.Build();
-            return configuration;
+                    serviceConfig.OnError(e =>
+                    {
+                        Console.WriteLine("Service {0} errored with exception : {1}", name, e.Message);
+                    });
+                });
+            });       
         }
     }
+
 }
